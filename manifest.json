@@ -1,15 +1,24 @@
 {
   "name": "Cinemana Iraq",
-  "version": "2.0.0",
-  "description": "Iraq-only scraper for Nuvio: Shabakaty Cinemana + Cee merged into one ranked list",
+  "version": "1.3.0",
+  "description": "Iraq-only streaming scrapers for Nuvio: Shabakaty Cinemana and Cee",
   "author": "me",
   "scrapers": [
     {
-      "id": "iraq",
-      "name": "Cinemana + Cee",
-      "description": "Cinemana and Cee merged and ranked by quality - works only inside Iraq",
-      "version": "2.0.0",
-      "filename": "providers/iraq.js",
+      "id": "cinemana",
+      "name": "Cinemana",
+      "description": "Shabakaty Cinemana - works only on Iraq / Earthlink network",
+      "version": "1.0.2",
+      "filename": "providers/cinemana.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true
+    },
+    {
+      "id": "cee",
+      "name": "Cee",
+      "description": "Cee (cee.buzz) - works only inside Iraq",
+      "version": "1.0.2",
+      "filename": "providers/cee.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true
     }
