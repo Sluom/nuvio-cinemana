@@ -1,7 +1,7 @@
 {
   "name": "Cinemana Iraq",
-  "version": "1.3.0",
-  "description": "Iraq-only streaming scrapers for Nuvio: Shabakaty Cinemana and Cee",
+  "version": "1.6.0",
+  "description": "Streaming scrapers for Nuvio: Shabakaty Cinemana, Cee, CinemaBox (Iraq only), AnimeWitcher and AnimeSlayer",
   "author": "me",
   "scrapers": [
     {
@@ -19,6 +19,33 @@
       "description": "Cee (cee.buzz) - works only inside Iraq",
       "version": "1.0.2",
       "filename": "providers/cee.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true
+    },
+    {
+      "id": "cinemabox",
+      "name": "CinemaBox",
+      "description": "CinemaBox (cinema.albox.co) - works only inside Iraq",
+      "version": "1.0.0",
+      "filename": "providers/cinemabox.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true
+    },
+    {
+      "id": "animewitcher",
+      "name": "AnimeWitcher",
+      "description": "AnimeWitcher - Arabic anime (PixelDrain / KrakenFiles servers)",
+      "version": "1.0.0",
+      "filename": "providers/animewitcher.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true
+    },
+    {
+      "id": "animeslayer",
+      "name": "AnimeSlayer",
+      "description": "AnimeSlayer (anslayer.com) - Arabic anime (MediaFire / Playmate / Streamtape)",
+      "version": "1.0.0",
+      "filename": "providers/animeslayer.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true
     }
