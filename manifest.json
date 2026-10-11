@@ -1,0 +1,17 @@
+{
+  "name": "Cinemana Iraq",
+  "version": "1.0.0",
+  "description": "Shabakaty Cinemana scraper for Nuvio (Iraq / Earthlink only)",
+  "author": "me",
+  "scrapers": [
+    {
+      "id": "cinemana",
+      "name": "Cinemana",
+      "description": "Shabakaty Cinemana - works only on Iraq / Earthlink network",
+      "version": "1.0.0",
+      "filename": "providers/cinemana.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true
+    }
+  ]
+}
