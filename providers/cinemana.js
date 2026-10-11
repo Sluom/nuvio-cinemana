@@ -4,7 +4,7 @@
 //
 // NOTE: Cinemana only works from inside Iraq / Earthlink network.
 
-var TMDB_API_KEY = '16fc93e65cf8c9184b8ac53006288677'; 
+var TMDB_API_KEY = '16fc93e65cf8c9184b8ac53006288677';
 
 var MAIN_URL = 'https://cinemana.shabakaty.cc';
 var API = MAIN_URL + '/api/android';
@@ -130,18 +130,33 @@ function fetchStreams(videoId) {
       .filter(function (f) { return f && f.videoUrl; })
       .map(function (f) {
         var q = qualityNumber(f.resolution);
+        var label = q ? q + 'p' : (f.resolution || 'Auto');
         return {
           name: 'Cinemana',
-          title: 'Cinemana ' + (f.resolution || 'Auto'),
+          title: 'Cinemana ' + label,
           url: f.videoUrl,
-          quality: q ? q + 'p' : 'Auto',
+          quality: label,
           provider: 'cinemana',
           type: /\.m3u8/i.test(f.videoUrl) ? 'm3u8' : 'mp4',
-          _q: q
+          _q: q,
+          _label: label
         };
       });
     out.sort(function (a, b) { return b._q - a._q; }); // highest quality first
-    out.forEach(function (o) { delete o._q; });
+
+    // Some Nuvio versions re-sort the list alphabetically by text, which puts
+    // 1080p before 2160p. A rank prefix makes the alphabetical order equal
+    // the quality order (1 - 2160p, 2 - 1080p, 3 - 720p, ...).
+    var pad = String(out.length).length;
+    out.forEach(function (o, i) {
+      var rank = String(i + 1);
+      while (rank.length < pad) rank = '0' + rank;
+      var label = rank + ' - ' + o._label;
+      o.title = 'Cinemana ' + label;
+      o.quality = label;
+      delete o._q;
+      delete o._label;
+    });
     return out;
   });
 }
