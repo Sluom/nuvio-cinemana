@@ -2,52 +2,97 @@
 // Ported from the CloudStream Cee plugin. Promise-based only (no async/await),
 // because some Nuvio runtimes (Hermes sandbox) do not support it.
 //
+// Search order: English title -> Arabic title -> original title (from TMDB).
+// Matching compares the result's en_title AND ar_title with all of them.
+//
 // NOTE: Cee only works from inside Iraq.
 
 var TMDB_API_KEY = '16fc93e65cf8c9184b8ac53006288677';
 
+var SITE_NAME = 'Cee';
+var SITE_KEY = 'cee';
 var MAIN_URL = 'https://cee.buzz';
+
 var API = MAIN_URL + '/api/android';
-var TAG = '[Cee]';
+var TAG = '[' + SITE_NAME + ']';
+var TIMEOUT_MS = 15000;
+
+// ------------------------------------------------------------------ helpers
+function withTimeout(promise, ms) {
+  return new Promise(function (resolve, reject) {
+    var done = false;
+    var t = setTimeout(function () {
+      if (!done) { done = true; reject(new Error('timeout')); }
+    }, ms);
+    promise.then(function (v) {
+      if (!done) { done = true; clearTimeout(t); resolve(v); }
+    }, function (e) {
+      if (!done) { done = true; clearTimeout(t); reject(e); }
+    });
+  });
+}
 
 function getJson(url) {
-  return fetch(url, {
+  return withTimeout(fetch(url, {
     headers: {
       'Accept': 'application/json',
       'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36'
     }
-  }).then(function (res) {
+  }), TIMEOUT_MS).then(function (res) {
     if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
     return res.json();
   });
 }
 
+// Arabic-aware normalisation: removes diacritics, unifies alef / ya / ta-marbuta
 function normalize(s) {
   return String(s || '')
     .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+    .replace(/[\u0623\u0625\u0622\u0671]/g, '\u0627')
+    .replace(/\u0649/g, '\u064A')
+    .replace(/\u0629/g, '\u0647')
     .replace(/[^a-z0-9\u0600-\u06ff]+/g, ' ')
     .trim();
 }
 
-// 1) TMDB id -> title + year
+function unique(list) {
+  var out = [];
+  list.forEach(function (x) { if (x && out.indexOf(x) === -1) out.push(x); });
+  return out;
+}
+
+// 1) TMDB id -> English / Arabic / original title + year
+function tmdbOne(tmdbId, kind, lang) {
+  var url = 'https://api.themoviedb.org/3/' + kind + '/' + tmdbId +
+    '?api_key=' + TMDB_API_KEY + '&language=' + lang;
+  return getJson(url).catch(function () { return null; });
+}
+
 function getTmdbInfo(tmdbId, mediaType) {
   var kind = mediaType === 'tv' ? 'tv' : 'movie';
-  var url = 'https://api.themoviedb.org/3/' + kind + '/' + tmdbId +
-    '?api_key=' + TMDB_API_KEY + '&language=en-US';
-  return getJson(url).then(function (d) {
-    var date = d.release_date || d.first_air_date || '';
+  return Promise.all([tmdbOne(tmdbId, kind, 'en-US'), tmdbOne(tmdbId, kind, 'ar')]).then(function (r) {
+    var en = r[0] || {};
+    var ar = r[1] || {};
+    if (!r[0] && !r[1]) throw new Error('TMDB lookup failed');
+    var date = en.release_date || en.first_air_date || ar.release_date || ar.first_air_date || '';
+    var terms = unique([
+      en.title || en.name,
+      ar.title || ar.name,
+      en.original_title || en.original_name || ar.original_title || ar.original_name
+    ]);
     return {
-      title: d.title || d.name || '',
-      original: d.original_title || d.original_name || '',
+      terms: terms,
+      names: terms.map(normalize).filter(function (n) { return n; }),
       year: parseInt(date.substring(0, 4), 10) || null
     };
   });
 }
 
 // 2) Search Cee (same endpoint the CloudStream plugin uses)
-function searchCinemana(title, mediaType) {
-  if (!title) return Promise.resolve([]);
-  var enc = encodeURIComponent(title);
+function searchSite(term, mediaType) {
+  if (!term) return Promise.resolve([]);
+  var enc = encodeURIComponent(term);
   var type = mediaType === 'tv' ? 'series' : 'movies';
   var url = API + '/AdvancedSearch?level=0&videoTitle=' + enc +
     '&staffTitle=' + enc +
@@ -58,10 +103,20 @@ function searchCinemana(title, mediaType) {
     .catch(function () { return []; });
 }
 
-// 3) Pick the best match by English title + year
+// 3) Pick the best match: Arabic or English title + year
+function titleScore(itemTitle, names) {
+  var t = normalize(itemTitle);
+  if (!t) return 0;
+  if (names.indexOf(t) !== -1) return 100;
+  var partial = names.some(function (n) {
+    if (Math.min(n.length, t.length) < 3) return false;
+    return t.indexOf(n) !== -1 || n.indexOf(t) !== -1;
+  });
+  return partial ? 50 : 0;
+}
+
 function pickBest(results, info, mediaType) {
   var wantSeries = mediaType === 'tv';
-  var names = [normalize(info.title), normalize(info.original)].filter(function (n) { return n; });
   var best = null;
   var bestScore = 0;
 
@@ -71,15 +126,8 @@ function pickBest(results, info, mediaType) {
       var isSeries = parseInt(it.kind, 10) === 2;
       if (isSeries !== wantSeries) return;
     }
-    var en = normalize(it.en_title);
-    if (!en) return;
 
-    var score = 0;
-    if (names.indexOf(en) !== -1) {
-      score = 100;
-    } else if (names.some(function (n) { return en.indexOf(n) !== -1 || n.indexOf(en) !== -1; })) {
-      score = 50;
-    }
+    var score = Math.max(titleScore(it.en_title, info.names), titleScore(it.ar_title, info.names));
     if (score === 0) return;
 
     var y = parseInt(it.year, 10);
@@ -95,6 +143,20 @@ function pickBest(results, info, mediaType) {
   });
 
   return bestScore >= 50 ? best : null;
+}
+
+// English -> Arabic -> original, stop at the first match
+function findItem(info, mediaType) {
+  var chain = Promise.resolve(null);
+  info.terms.forEach(function (term) {
+    chain = chain.then(function (found) {
+      if (found) return found;
+      return searchSite(term, mediaType).then(function (res) {
+        return pickBest(res, info, mediaType);
+      });
+    });
+  });
+  return chain;
 }
 
 // 4) For TV: find the episode's own id. For movies: the item id is enough.
@@ -132,11 +194,11 @@ function fetchStreams(videoId) {
         var q = qualityNumber(f.resolution);
         var label = q ? q + 'p' : (f.resolution || 'Auto');
         return {
-          name: 'Cee',
-          title: 'Cee ' + label,
+          name: SITE_NAME,
+          title: SITE_NAME + ' ' + label,
           url: f.videoUrl,
           quality: label,
-          provider: 'cee',
+          provider: SITE_KEY,
           type: /\.m3u8/i.test(f.videoUrl) ? 'm3u8' : 'mp4',
           _q: q,
           _label: label
@@ -152,7 +214,7 @@ function fetchStreams(videoId) {
       var rank = String(i + 1);
       while (rank.length < pad) rank = '0' + rank;
       var label = rank + ' - ' + o._label;
-      o.title = 'Cee ' + label;
+      o.title = SITE_NAME + ' ' + label;
       o.quality = label;
       delete o._q;
       delete o._label;
@@ -166,21 +228,10 @@ function getStreams(tmdbId, mediaType, season, episode) {
   console.log(TAG, 'Fetching', mediaType, tmdbId, season || '', episode || '');
 
   return getTmdbInfo(tmdbId, mediaType)
-    .then(function (info) {
-      return searchCinemana(info.title, mediaType).then(function (res) {
-        var hit = pickBest(res, info, mediaType);
-        if (hit) return hit;
-        if (info.original && info.original !== info.title) {
-          return searchCinemana(info.original, mediaType).then(function (res2) {
-            return pickBest(res2, info, mediaType);
-          });
-        }
-        return null;
-      });
-    })
+    .then(function (info) { return findItem(info, mediaType); })
     .then(function (item) {
       if (!item) {
-        console.log(TAG, 'No match found on Cee');
+        console.log(TAG, 'No match found on ' + SITE_NAME);
         return null;
       }
       return resolveVideoId(item, mediaType, season, episode);
