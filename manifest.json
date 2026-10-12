@@ -1,14 +1,14 @@
 {
   "name": "Cinemana Iraq",
-  "version": "1.6.0",
-  "description": "Streaming scrapers for Nuvio: Shabakaty Cinemana, Cee, CinemaBox (Iraq only), AnimeWitcher and AnimeSlayer",
+  "version": "1.8.0",
+  "description": "Streaming scrapers for Nuvio: Shabakaty Cinemana, Cee, CinemaBox (Iraq only), AnimeWitcher, AnimeSlayer and CinemaPlus",
   "author": "me",
   "scrapers": [
     {
       "id": "cinemana",
       "name": "Cinemana",
       "description": "Shabakaty Cinemana - works only on Iraq / Earthlink network",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "filename": "providers/cinemana.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true
@@ -17,7 +17,7 @@
       "id": "cee",
       "name": "Cee",
       "description": "Cee (cee.buzz) - works only inside Iraq",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "filename": "providers/cee.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true
@@ -44,8 +44,17 @@
       "id": "animeslayer",
       "name": "AnimeSlayer",
       "description": "AnimeSlayer (anslayer.com) - Arabic anime (MediaFire / Playmate / Streamtape)",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "filename": "providers/animeslayer.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true
+    },
+    {
+      "id": "cinemaplus",
+      "name": "CinemaPlus",
+      "description": "Cinema Plus - matched by TMDB id, HLS streams",
+      "version": "1.0.0",
+      "filename": "providers/cinemaplus.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true
     }
