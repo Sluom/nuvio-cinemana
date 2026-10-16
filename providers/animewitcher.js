@@ -2,7 +2,7 @@
 // Ported from the CloudStream plugin. Promise-based only (no async/await).
 //
 // How it works:
-//   TMDB id -> titles (English / Arabic / alternative romaji) -> Algolia search
+//   TMDB id -> titles (English / original) -> Algolia search
 //   -> pick the series entry (and season) -> Firestore episode list
 //   -> Firestore server list for the episode -> direct links.
 //
@@ -18,9 +18,8 @@ var algoliaAppId = 'D8LH9I7ZL7';
 var algoliaApiKey = 'b56c01ef52540ef334bcdbaa00ded9e4';
 
 var TAG = '[AnimeWitcher]';
-var TIMEOUT_MS = 12000;
-var TOTAL_TIMEOUT_MS = 40000;
-var MAX_TERMS = 6;
+var TIMEOUT_MS = 10000;
+var TOTAL_TIMEOUT_MS = 25000;
 
 var ALGOLIA_ATTRS = ['objectID', 'name', 'poster_uri', 'type', 'details', 'tags', 'story',
   'english_title', 'poster', 'rating', 'dubbed', 'path'];
@@ -100,30 +99,16 @@ function tmdbGet(tmdbId, kind, lang, extra) {
 
 function getTmdbInfo(tmdbId, mediaType) {
   var kind = mediaType === 'tv' ? 'tv' : 'movie';
-  return Promise.all([
-    tmdbGet(tmdbId, kind, 'en-US', '&append_to_response=alternative_titles'),
-    tmdbGet(tmdbId, kind, 'ar')
-  ]).then(function (r) {
-    var en = r[0] || {};
-    var ar = r[1] || {};
-    if (!r[0] && !r[1]) throw new Error('TMDB lookup failed');
+  return tmdbGet(tmdbId, kind, 'en-US').then(function (en) {
+    if (!en) throw new Error('TMDB lookup failed');
 
-    var genreIds = ((en.genres || ar.genres) || []).map(function (g) { return g.id; });
-    var lang = en.original_language || ar.original_language || '';
-
-    var altList = [];
-    var at = en.alternative_titles;
-    ((at && (at.results || at.titles)) || []).forEach(function (x) {
-      var t = x && x.title;
-      if (t && /^[\u0000-\u024F]+$/.test(t)) altList.push(t); // Latin-script alternative titles (romaji)
-    });
+    var genreIds = (en.genres || []).map(function (g) { return g.id; });
+    var lang = en.original_language || '';
 
     var terms = unique([
       en.title || en.name,
-      ar.title || ar.name
-    ].concat(altList.slice(0, 4)).concat([
       en.original_title || en.original_name
-    ]));
+    ]);
 
     var seasons = [];
     (en.seasons || []).forEach(function (s) {
@@ -132,7 +117,7 @@ function getTmdbInfo(tmdbId, mediaType) {
 
     return {
       isAnime: genreIds.indexOf(16) !== -1 || lang === 'ja',
-      terms: terms.slice(0, MAX_TERMS),
+      terms: terms,
       names: terms.map(normalize).filter(function (n) { return n; }),
       seasons: seasons
     };
