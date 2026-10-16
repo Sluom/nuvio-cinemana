@@ -2,13 +2,13 @@
 // Ported from the CloudStream plugin. Promise-based only (no async/await).
 // NOTE: works only from inside Iraq.
 //
-// Search order: English title -> Arabic title -> original title (from TMDB).
+// Search order: English title -> original title (from TMDB). One TMDB request.
 
 var TMDB_API_KEY = '16fc93e65cf8c9184b8ac53006288677';
 
 var API = 'https://cinema.albox.co/api/v4';
 var TAG = '[CinemaBox]';
-var TIMEOUT_MS = 15000;
+var TIMEOUT_MS = 10000;
 var USER_AGENT = 'Dalvik/2.1.0 (Linux; U; Android 14; 23043RP34G Build/UKQ1.240624.001)';
 
 // Random per-session device id (the API only uses it to tell devices apart)
@@ -97,19 +97,16 @@ function tmdbOne(tmdbId, kind, lang) {
   return getJson(url).catch(function () { return null; });
 }
 
-// -> { titles: [english, arabic, original], year }
+// -> { titles: [english, original], year }
 function getTmdbInfo(tmdbId, mediaType) {
   var kind = mediaType === 'tv' ? 'tv' : 'movie';
-  return Promise.all([tmdbOne(tmdbId, kind, 'en-US'), tmdbOne(tmdbId, kind, 'ar')]).then(function (r) {
-    var en = r[0] || {};
-    var ar = r[1] || {};
-    if (!r[0] && !r[1]) throw new Error('TMDB lookup failed');
-    var date = en.release_date || en.first_air_date || ar.release_date || ar.first_air_date || '';
+  return tmdbOne(tmdbId, kind, 'en-US').then(function (en) {
+    if (!en) throw new Error('TMDB lookup failed');
+    var date = en.release_date || en.first_air_date || '';
     return {
       titles: unique([
         en.title || en.name,
-        ar.title || ar.name,
-        en.original_title || en.original_name || ar.original_title || ar.original_name
+        en.original_title || en.original_name
       ]),
       year: parseInt(date.substring(0, 4), 10) || null
     };
@@ -185,7 +182,7 @@ function findWithTerm(term, info, mediaType) {
   });
 }
 
-// English -> Arabic -> original, stop at the first match
+// English -> original (only if different), stop at the first match
 function findShow(info, mediaType) {
   var chain = Promise.resolve(null);
   info.titles.forEach(function (term) {
