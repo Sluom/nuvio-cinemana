@@ -1,7 +1,7 @@
 // Nuvio provider: AnimeSlayer / أنمي سلاير (anslayer.com)
 // Ported from the CloudStream plugin. Promise-based only (no async/await).
 //
-// Flow: TMDB id -> titles (English / Arabic / alternative romaji)
+// Flow: TMDB id -> titles (English / original)
 //   -> search AnimeSlayer -> pick the series entry (and season)
 //   -> anime details (episodes are embedded) -> hoster list for the episode
 //   -> direct links.
@@ -18,9 +18,8 @@ var CLIENT_SECRET = '7befba6263cc14c90d2f1d6da2c5cf9b251bfbbd';
 var UA = 'okhttp/5.3.2';
 
 var TAG = '[AnimeSlayer]';
-var TIMEOUT_MS = 12000;
-var TOTAL_TIMEOUT_MS = 40000;
-var MAX_TERMS = 6;
+var TIMEOUT_MS = 10000;
+var TOTAL_TIMEOUT_MS = 25000;
 
 // ------------------------------------------------------------------ helpers
 function withTimeout(promise, ms) {
@@ -89,40 +88,26 @@ function tmdbGet(tmdbId, kind, lang, extra) {
 
 function getTmdbInfo(tmdbId, mediaType) {
   var kind = mediaType === 'tv' ? 'tv' : 'movie';
-  return Promise.all([
-    tmdbGet(tmdbId, kind, 'en-US', '&append_to_response=alternative_titles'),
-    tmdbGet(tmdbId, kind, 'ar')
-  ]).then(function (r) {
-    var en = r[0] || {};
-    var ar = r[1] || {};
-    if (!r[0] && !r[1]) throw new Error('TMDB lookup failed');
+  return tmdbGet(tmdbId, kind, 'en-US').then(function (en) {
+    if (!en) throw new Error('TMDB lookup failed');
 
-    var genreIds = ((en.genres || ar.genres) || []).map(function (g) { return g.id; });
-    var lang = en.original_language || ar.original_language || '';
-
-    var altList = [];
-    var at = en.alternative_titles;
-    ((at && (at.results || at.titles)) || []).forEach(function (x) {
-      var t = x && x.title;
-      if (t && /^[\u0000-\u024F]+$/.test(t)) altList.push(t); // Latin-script alternative titles (romaji)
-    });
+    var genreIds = (en.genres || []).map(function (g) { return g.id; });
+    var lang = en.original_language || '';
 
     var terms = unique([
       en.title || en.name,
-      ar.title || ar.name
-    ].concat(altList.slice(0, 4)).concat([
       en.original_title || en.original_name
-    ]));
+    ]);
 
     var seasons = [];
     (en.seasons || []).forEach(function (s) {
       if (s && s.season_number > 0) seasons.push({ number: s.season_number, count: s.episode_count || 0 });
     });
 
-    var date = en.release_date || en.first_air_date || ar.release_date || ar.first_air_date || '';
+    var date = en.release_date || en.first_air_date || '';
     return {
       isAnime: genreIds.indexOf(16) !== -1 || lang === 'ja',
-      terms: terms.slice(0, MAX_TERMS),
+      terms: terms,
       names: terms.map(normalize).filter(function (n) { return n; }),
       seasons: seasons,
       year: parseInt(date.substring(0, 4), 10) || null
@@ -321,10 +306,11 @@ function resolveMediafire(url) {
     if (!m) return null;
     var dl = m[1].replace(/&amp;/g, '&');
     var file = dl.substring(dl.lastIndexOf('/') + 1);
+    try { file = decodeURIComponent(file); } catch (e) { /* keep the raw name */ }
     return {
       host: 'MediaFire',
       url: dl,
-      q: qualityNumber(decodeURIComponent(file)),
+      q: qualityNumber(file),
       headers: { 'Referer': 'https://www.mediafire.com/' }
     };
   }).catch(function () { return null; });
