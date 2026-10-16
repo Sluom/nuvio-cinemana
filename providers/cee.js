@@ -2,8 +2,8 @@
 // Ported from the CloudStream Cee plugin. Promise-based only (no async/await),
 // because some Nuvio runtimes (Hermes sandbox) do not support it.
 //
-// Search order: English title -> Arabic title -> original title (from TMDB).
-// Matching compares the result's en_title AND ar_title with all of them.
+// Search order: English title -> original title (from TMDB).
+// One TMDB request and at most two searches, so results come back fast.
 //
 // NOTE: Cee only works from inside Iraq.
 
@@ -15,7 +15,7 @@ var MAIN_URL = 'https://cee.buzz';
 
 var API = MAIN_URL + '/api/android';
 var TAG = '[' + SITE_NAME + ']';
-var TIMEOUT_MS = 15000;
+var TIMEOUT_MS = 10000;
 
 // ------------------------------------------------------------------ helpers
 function withTimeout(promise, ms) {
@@ -62,7 +62,7 @@ function unique(list) {
   return out;
 }
 
-// 1) TMDB id -> English / Arabic / original title + year
+// 1) TMDB id -> English / original title + year (one request)
 function tmdbOne(tmdbId, kind, lang) {
   var url = 'https://api.themoviedb.org/3/' + kind + '/' + tmdbId +
     '?api_key=' + TMDB_API_KEY + '&language=' + lang;
@@ -71,15 +71,12 @@ function tmdbOne(tmdbId, kind, lang) {
 
 function getTmdbInfo(tmdbId, mediaType) {
   var kind = mediaType === 'tv' ? 'tv' : 'movie';
-  return Promise.all([tmdbOne(tmdbId, kind, 'en-US'), tmdbOne(tmdbId, kind, 'ar')]).then(function (r) {
-    var en = r[0] || {};
-    var ar = r[1] || {};
-    if (!r[0] && !r[1]) throw new Error('TMDB lookup failed');
-    var date = en.release_date || en.first_air_date || ar.release_date || ar.first_air_date || '';
+  return tmdbOne(tmdbId, kind, 'en-US').then(function (en) {
+    if (!en) throw new Error('TMDB lookup failed');
+    var date = en.release_date || en.first_air_date || '';
     var terms = unique([
       en.title || en.name,
-      ar.title || ar.name,
-      en.original_title || en.original_name || ar.original_title || ar.original_name
+      en.original_title || en.original_name
     ]);
     return {
       terms: terms,
@@ -103,7 +100,7 @@ function searchSite(term, mediaType) {
     .catch(function () { return []; });
 }
 
-// 3) Pick the best match: Arabic or English title + year
+// 3) Pick the best match: title + year
 function titleScore(itemTitle, names) {
   var t = normalize(itemTitle);
   if (!t) return 0;
@@ -145,7 +142,7 @@ function pickBest(results, info, mediaType) {
   return bestScore >= 50 ? best : null;
 }
 
-// English -> Arabic -> original, stop at the first match
+// English -> original (only if different), stop at the first match
 function findItem(info, mediaType) {
   var chain = Promise.resolve(null);
   info.terms.forEach(function (term) {
