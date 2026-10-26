@@ -220,9 +220,35 @@ function fetchStreams(videoId) {
   });
 }
 
-function getStreams(tmdbId, mediaType, season, episode) {
+function getStreams(id, mediaType, season, episode) {
   mediaType = (mediaType === 'tv' || mediaType === 'series') ? 'tv' : 'movie';
-  console.log(TAG, 'Fetching', mediaType, tmdbId, season || '', episode || '');
+  console.log(TAG, 'Fetching', mediaType, id, season || '', episode || '');
+
+  // 1. فحص إذا كان المعرف قادم من كتالوج Cee الجديد مباشرة
+  var ceeIdMatch = String(id).match(/^cee:(\d+)/);
+
+  if (ceeIdMatch) {
+    var ceeId = ceeIdMatch[1];
+    console.log(TAG, 'Direct Cee ID detected:', ceeId);
+    
+    // تخطي البحث في TMDB والذهاب للروابط مباشرة
+    var resolvePromise = (mediaType === 'tv')
+      ? resolveVideoId({ nb: ceeId }, mediaType, season, episode)
+      : Promise.resolve(ceeId);
+
+    return resolvePromise
+      .then(function (videoId) {
+        return videoId ? fetchStreams(videoId) : [];
+      })
+      .catch(function (err) {
+        console.log(TAG, 'Error:', err && err.message ? err.message : err);
+        return [];
+      });
+  }
+
+  // 2. البحث التقليدي في حال استخدام كتالوج TMDB القديم
+  var tmdbIdMatch = String(id).match(/^tmdb:(\d+)/);
+  var tmdbId = tmdbIdMatch ? tmdbIdMatch[1] : id;
 
   return getTmdbInfo(tmdbId, mediaType)
     .then(function (info) { return findItem(info, mediaType); })
