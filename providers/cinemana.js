@@ -10,8 +10,10 @@ var TMDB_API_KEY = '16fc93e65cf8c9184b8ac53006288677';
 var SITE_NAME = 'Cinemana';
 var SITE_KEY = 'cinemana';
 var ID_PREFIX = 'cinemana';
-var OTHER_PREFIXES = ['cee'];
+var OTHER_PREFIXES = [];
 var MAIN_URL = 'https://cinemana.shabakaty.cc';
+var CEE_URL = 'https://cee.buzz';
+var CEE_API = CEE_URL + '/api/android';
 
 var API = MAIN_URL + '/api/android';
 var TAG = '[' + SITE_NAME + ']';
@@ -32,13 +34,13 @@ function withTimeout(promise, ms) {
   });
 }
 
-function getJson(url) {
-  return withTimeout(fetch(url, {
-    headers: {
-      'Accept': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36'
-    }
-  }), TIMEOUT_MS).then(function (res) {
+function getJson(url, referer) {
+  var headers = {
+    'Accept': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36'
+  };
+  if (referer) headers['Referer'] = referer;
+  return withTimeout(fetch(url, { headers: headers }), TIMEOUT_MS).then(function (res) {
     if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
     return res.json();
   });
@@ -97,6 +99,21 @@ function getTmdbInfo(tmdbId, mediaType) {
       terms: terms,
       names: terms.map(normalize).filter(function (n) { return n; }),
       year: parseInt(date.substring(0, 4), 10) || null
+    };
+  });
+}
+
+// 1b) Cee ID -> titles + year, straight from Cee (same API shape as Cinemana)
+function getCeeInfo(nb) {
+  return getJson(CEE_API + '/allVideoInfo/id/' + nb, CEE_URL).then(function (d) {
+    if (!d || typeof d !== 'object') throw new Error('Cee info is empty for ' + nb);
+    var terms = unique([d.en_title, d.ar_title]);
+    if (!terms.length) throw new Error('Cee info has no title for ' + nb);
+    console.log(TAG, 'Cee title:', terms.join(' | '), 'year:', d.year);
+    return {
+      terms: terms,
+      names: terms.map(normalize).filter(function (n) { return n; }),
+      year: parseInt(d.year, 10) || null
     };
   });
 }
@@ -244,9 +261,27 @@ function getStreams(id, mediaType, season, episode) {
   mediaType = (mediaType === 'tv' || mediaType === 'series') ? 'tv' : 'movie';
   console.log(TAG, 'Fetching', mediaType, id, season || '', episode || '');
 
-  // A) ID belongs to the other site (cee:...) -> not mine, return nothing
+  // A) Catalog ID from Cee (cee:12345): get the title + year from Cee,
+  //    then search for the same work on Cinemana
+  var ceeLocal = parseLocalId(id, 'cee');
+  if (ceeLocal) {
+    console.log(TAG, 'Cee catalog ID detected:', ceeLocal.nb);
+    return getCeeInfo(ceeLocal.nb)
+      .then(function (info) { return findItem(info, mediaType); })
+      .then(function (item) {
+        if (!item) {
+          console.log(TAG, 'Not found on ' + SITE_NAME + ' (maybe a Cee-only title)');
+          return null;
+        }
+        return resolveVideoId(item, mediaType, season || ceeLocal.season, episode || ceeLocal.episode);
+      })
+      .then(function (videoId) {
+        return videoId ? fetchStreams(videoId) : [];
+      })
+      .catch(logError);
+  }
+
   if (hasOtherPrefix(id)) {
-    console.log(TAG, 'ID is for another provider, skipping:', id);
     return Promise.resolve([]);
   }
 
