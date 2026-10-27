@@ -8,7 +8,7 @@
       "id": "cinemana",
       "name": "Cinemana",
       "description": "Shabakaty Cinemana - works only on Iraq / Earthlink network",
-      "version": "2.0.0",
+      "version": "2.0.",
       "filename": "providers/cinemana.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true
@@ -17,7 +17,7 @@
       "id": "cee",
       "name": "Cee",
       "description": "Cee (cee.buzz) - works only inside Iraq",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "filename": "providers/cee.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true
