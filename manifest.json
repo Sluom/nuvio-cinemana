@@ -1,6 +1,6 @@
 {
   "name": "Cinemana Iraq",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Streaming scrapers for Nuvio: Shabakaty Cinemana and Cee (Iraq only)",
   "author": "me",
   "scrapers": [
@@ -8,7 +8,7 @@
       "id": "cinemana",
       "name": "Cinemana",
       "description": "Shabakaty Cinemana - works only on Iraq / Earthlink network",
-      "version": "2.0.",
+      "version": "2.0.1",
       "filename": "providers/cinemana.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true
