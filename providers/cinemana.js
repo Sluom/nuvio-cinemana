@@ -1,9 +1,7 @@
 // Nuvio provider: Shabakaty Cinemana (سينمانا)
-// Ported from the CloudStream plugin. Promise-based only (no async/await),
-// because some Nuvio runtimes (Hermes sandbox) do not support it.
-//
-// Search order: English title -> original title (from TMDB).
-// One TMDB request and at most two searches, so results come back fast.
+// Works on local IDs  ->  cinemana:12345  (movie)  or  cinemana:12345:1:2  (series, season 1 episode 2)
+// Also works on TMDB IDs (search by English title -> original title).
+// Promise-based only (no async/await), because some Nuvio runtimes (Hermes sandbox) do not support it.
 //
 // NOTE: Cinemana only works from inside Iraq / Earthlink network.
 
@@ -11,6 +9,8 @@ var TMDB_API_KEY = '16fc93e65cf8c9184b8ac53006288677';
 
 var SITE_NAME = 'Cinemana';
 var SITE_KEY = 'cinemana';
+var ID_PREFIX = 'cinemana';
+var OTHER_PREFIXES = ['cee'];
 var MAIN_URL = 'https://cinemana.shabakaty.cc';
 
 var API = MAIN_URL + '/api/android';
@@ -60,6 +60,21 @@ function unique(list) {
   var out = [];
   list.forEach(function (x) { if (x && out.indexOf(x) === -1) out.push(x); });
   return out;
+}
+
+// Local ID parser: "cinemana:123"  or  "cinemana:123:1:2"
+function parseLocalId(id, prefix) {
+  var m = String(id).match(new RegExp('^' + prefix + ':(\\d+)(?::(\\d+):(\\d+))?'));
+  if (!m) return null;
+  return { nb: m[1], season: m[2] || null, episode: m[3] || null };
+}
+
+function hasOtherPrefix(id) {
+  var s = String(id);
+  for (var i = 0; i < OTHER_PREFIXES.length; i++) {
+    if (s.indexOf(OTHER_PREFIXES[i] + ':') === 0) return true;
+  }
+  return false;
 }
 
 // 1) TMDB id -> English / original title + year (one request)
@@ -220,9 +235,41 @@ function fetchStreams(videoId) {
   });
 }
 
-function getStreams(tmdbId, mediaType, season, episode) {
+function logError(err) {
+  console.log(TAG, 'Error:', err && err.message ? err.message : err);
+  return [];
+}
+
+function getStreams(id, mediaType, season, episode) {
   mediaType = (mediaType === 'tv' || mediaType === 'series') ? 'tv' : 'movie';
-  console.log(TAG, 'Fetching', mediaType, tmdbId, season || '', episode || '');
+  console.log(TAG, 'Fetching', mediaType, id, season || '', episode || '');
+
+  // A) ID belongs to the other site (cee:...) -> not mine, return nothing
+  if (hasOtherPrefix(id)) {
+    console.log(TAG, 'ID is for another provider, skipping:', id);
+    return Promise.resolve([]);
+  }
+
+  // B) My own local ID: cinemana:12345 (or cinemana:12345:S:E)
+  var local = parseLocalId(id, ID_PREFIX);
+  if (local) {
+    console.log(TAG, 'Local ID detected:', local.nb);
+    var s = season || local.season;
+    var e = episode || local.episode;
+    var resolvePromise = (mediaType === 'tv')
+      ? resolveVideoId({ nb: local.nb }, mediaType, s, e)
+      : Promise.resolve(local.nb);
+
+    return resolvePromise
+      .then(function (videoId) {
+        return videoId ? fetchStreams(videoId) : [];
+      })
+      .catch(logError);
+  }
+
+  // C) TMDB ID -> search on the site
+  var tmdbIdMatch = String(id).match(/^tmdb:(\d+)/);
+  var tmdbId = tmdbIdMatch ? tmdbIdMatch[1] : String(id);
 
   return getTmdbInfo(tmdbId, mediaType)
     .then(function (info) { return findItem(info, mediaType); })
@@ -236,10 +283,7 @@ function getStreams(tmdbId, mediaType, season, episode) {
     .then(function (videoId) {
       return videoId ? fetchStreams(videoId) : [];
     })
-    .catch(function (err) {
-      console.log(TAG, 'Error:', err && err.message ? err.message : err);
-      return [];
-    });
+    .catch(logError);
 }
 
 if (typeof module !== 'undefined' && module.exports) {
