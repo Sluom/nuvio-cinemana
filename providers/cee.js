@@ -1,19 +1,22 @@
-// Nuvio provider: Cee (cee.buzz)
-// Works on local IDs  ->  cee:12345   (movie)  or  cee:12345:1:2  (series, season 1 episode 2)
-// Also works on TMDB IDs (live search through the Base64 endpoint).
-// Promise-based only (ES5 compatible for Hermes sandbox).
+// Nuvio provider: Cee (cee.buzz)  -  CEE IDs ONLY  (v2.1.0)
+// Works only on local IDs:
+//   cee:12345        movie, or an episode (the id of the episode itself, as in our catalog)
+//   cee:12345:1:2    series id + season 1 + episode 2
+// Any other id (tmdb:..., tt..., kitsu:...) is ignored: this provider returns nothing for it.
+// Promise-based only, ES5 syntax only (Hermes sandbox: no async/await, no arrow functions).
+//
+// DEBUG_ROWS: when true and nothing can be played, one extra row is returned whose title
+// explains why ("Cee DEBUG: ..."). Seeing that row proves the app really called this provider.
+// Set it to false when you do not need it any more.
 
-var TMDB_API_KEY = '16fc93e65cf8c9184b8ac53006288677';
+var DEBUG_ROWS = true;
 
 var SITE_NAME = 'Cee';
 var SITE_KEY = 'cee';
-var ID_PREFIX = 'cee';
-var OTHER_PREFIXES = ['cinemana'];
 var MAIN_URL = 'https://cee.buzz';
-
 var API = MAIN_URL + '/api/android';
 var TAG = '[' + SITE_NAME + ']';
-var TIMEOUT_MS = 10000;
+var TIMEOUT_MS = 12000;
 
 // ------------------------------------------------------------------ helpers
 function withTimeout(promise, ms) {
@@ -38,172 +41,32 @@ function getJson(url) {
       'Referer': MAIN_URL
     }
   }), TIMEOUT_MS).then(function (res) {
-    if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     return res.json();
   });
 }
 
-// Pure JS UTF-8 to Base64 encoder (works in Hermes without btoa/Buffer)
-function utf8ToBase64(str) {
-  var utf8 = unescape(encodeURIComponent(String(str || '')));
-  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-  var out = '';
-  var i = 0;
-  while (i < utf8.length) {
-    var c1 = utf8.charCodeAt(i++);
-    var c2 = i < utf8.length ? utf8.charCodeAt(i++) : NaN;
-    var c3 = i < utf8.length ? utf8.charCodeAt(i++) : NaN;
-
-    var e1 = c1 >> 2;
-    var e2 = ((c1 & 3) << 4) | (c2 >> 4);
-    var e3 = isNaN(c2) ? 64 : (((c2 & 15) << 2) | (c3 >> 6));
-    var e4 = isNaN(c3) ? 64 : (c3 & 63);
-
-    out += chars.charAt(e1) + chars.charAt(e2) + chars.charAt(e3) + chars.charAt(e4);
-  }
-  return out;
-}
-
-function normalize(s) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
-    .replace(/[\u0623\u0625\u0622\u0671]/g, '\u0627')
-    .replace(/\u0649/g, '\u064A')
-    .replace(/\u0629/g, '\u0647')
-    .replace(/[^a-z0-9\u0600-\u06ff]+/g, ' ')
-    .trim();
-}
-
-function unique(list) {
-  var out = [];
-  list.forEach(function (x) { if (x && out.indexOf(x) === -1) out.push(x); });
-  return out;
-}
-
-// Local ID parser: "cee:123"  or  "cee:123:1:2"
-function parseLocalId(id, prefix) {
-  var m = String(id).match(new RegExp('^' + prefix + ':(\\d+)(?::(\\d+):(\\d+))?'));
+// "cee:123"  or  "cee:123:1:2"   (also accepts the URL-encoded form "cee%3A123")
+function parseCeeId(id) {
+  var s = String(id === undefined || id === null ? '' : id);
+  try { s = decodeURIComponent(s); } catch (e) { /* keep as is */ }
+  var m = s.match(/^cee:(\d+)(?::(\d+):(\d+))?/i);
   if (!m) return null;
   return { nb: m[1], season: m[2] || null, episode: m[3] || null };
 }
 
-function hasOtherPrefix(id) {
-  var s = String(id);
-  for (var i = 0; i < OTHER_PREFIXES.length; i++) {
-    if (s.indexOf(OTHER_PREFIXES[i] + ':') === 0) return true;
-  }
-  return false;
+function qualityNumber(resolution) {
+  var m = String(resolution || '').match(/(\d{3,4})/);
+  if (m) return parseInt(m[1], 10);
+  if (/4k/i.test(String(resolution))) return 2160;
+  return 0;
 }
 
-// 1) TMDB id -> English, Original, and Arabic titles + year
-function tmdbOne(tmdbId, kind, lang) {
-  var url = 'https://api.themoviedb.org/3/' + kind + '/' + tmdbId +
-    '?api_key=' + TMDB_API_KEY + '&language=' + lang;
-  return getJson(url).catch(function () { return null; });
-}
-
-function getTmdbInfo(tmdbId, mediaType) {
-  var kind = mediaType === 'tv' ? 'tv' : 'movie';
-  return Promise.all([
-    tmdbOne(tmdbId, kind, 'en-US'),
-    tmdbOne(tmdbId, kind, 'ar-SA')
-  ]).then(function (res) {
-    var en = res[0];
-    var ar = res[1];
-    if (!en && !ar) throw new Error('TMDB lookup failed');
-    var primary = en || ar;
-    var date = primary.release_date || primary.first_air_date || '';
-    var rawTerms = [];
-    if (en) {
-      rawTerms.push(en.title || en.name);
-      rawTerms.push(en.original_title || en.original_name);
-    }
-    if (ar) {
-      rawTerms.push(ar.title || ar.name);
-    }
-    var terms = unique(rawTerms);
-    return {
-      terms: terms,
-      names: terms.map(normalize).filter(function (n) { return n; }),
-      year: parseInt(date.substring(0, 4), 10) || null
-    };
-  });
-}
-
-// 2) Search Cee using the captured Base64 endpoint
-function searchSite(term) {
-  if (!term) return Promise.resolve([]);
-  var b64 = utf8ToBase64(term.trim());
-  var url = API + '/video/V/2/itemsPerPage/20/video_title_search/' + b64 +
-    '/itemsPerPage/12/pageNumber/0/level/0';
-  return getJson(url)
-    .then(function (list) { return Array.isArray(list) ? list : []; })
-    .catch(function () { return []; });
-}
-
-// 3) Pick the best match: title + year
-function titleScore(itemTitle, names) {
-  var t = normalize(itemTitle);
-  if (!t) return 0;
-  if (names.indexOf(t) !== -1) return 100;
-  var partial = names.some(function (n) {
-    if (Math.min(n.length, t.length) < 3) return false;
-    return t.indexOf(n) !== -1 || n.indexOf(t) !== -1;
-  });
-  return partial ? 50 : 0;
-}
-
-function pickBest(results, info, mediaType) {
-  var wantSeries = mediaType === 'tv';
-  var best = null;
-  var bestScore = 0;
-
-  results.forEach(function (it) {
-    if (!it || !it.nb) return;
-    if (it.kind !== undefined && it.kind !== null) {
-      var isSeries = parseInt(it.kind, 10) === 2;
-      if (isSeries !== wantSeries) return;
-    }
-
-    var score = Math.max(titleScore(it.en_title, info.names), titleScore(it.ar_title, info.names));
-    if (score === 0) return;
-
-    var y = parseInt(it.year, 10);
-    if (info.year && y) {
-      if (y === info.year) score += 30;
-      else if (Math.abs(y - info.year) === 1) score += 10;
-      else if (!wantSeries) score -= 60;
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      best = it;
-    }
-  });
-
-  return bestScore >= 50 ? best : null;
-}
-
-function findItem(info, mediaType) {
-  var chain = Promise.resolve(null);
-  info.terms.forEach(function (term) {
-    chain = chain.then(function (found) {
-      if (found) return found;
-      return searchSite(term).then(function (res) {
-        return pickBest(res, info, mediaType);
-      });
-    });
-  });
-  return chain;
-}
-
-// 4) Resolve episode or movie videoId
-function resolveVideoId(item, mediaType, season, episode) {
-  if (mediaType !== 'tv') return Promise.resolve(String(item.nb));
-
+// Series id + season + episode  ->  the episode's own id
+function resolveEpisodeNb(seriesNb, season, episode) {
   var s = parseInt(season, 10) || 1;
   var e = parseInt(episode, 10) || 1;
-  return getJson(API + '/videoSeason/id/' + item.nb).then(function (eps) {
+  return getJson(API + '/videoSeason/id/' + seriesNb).then(function (eps) {
     if (!Array.isArray(eps)) return null;
     for (var i = 0; i < eps.length; i++) {
       var ep = eps[i];
@@ -215,14 +78,7 @@ function resolveVideoId(item, mediaType, season, episode) {
   });
 }
 
-function qualityNumber(resolution) {
-  var m = String(resolution || '').match(/(\d{3,4})/);
-  if (m) return parseInt(m[1], 10);
-  if (/4k/i.test(String(resolution))) return 2160;
-  return 0;
-}
-
-// 5) Fetch playable stream links
+// Playable links of one video id (a movie id or an episode id)
 function fetchStreams(videoId) {
   return getJson(API + '/transcoddedFiles/id/' + videoId).then(function (files) {
     if (!Array.isArray(files)) return [];
@@ -244,7 +100,7 @@ function fetchStreams(videoId) {
       });
     out.sort(function (a, b) { return b._q - a._q; });
 
-    // Rank prefix so alphabetical order = quality order
+    // Some Nuvio versions re-sort the list alphabetically; a rank prefix keeps quality order.
     var pad = String(out.length).length;
     out.forEach(function (o, i) {
       var rank = String(i + 1);
@@ -259,55 +115,62 @@ function fetchStreams(videoId) {
   });
 }
 
-function logError(err) {
-  console.log(TAG, 'Error:', err && err.message ? err.message : err);
-  return [];
+function debugRow(message) {
+  if (!DEBUG_ROWS) return [];
+  return [{
+    name: SITE_NAME,
+    title: SITE_NAME + ' DEBUG: ' + message,
+    url: MAIN_URL + '/',
+    quality: 'debug',
+    provider: SITE_KEY,
+    type: 'mp4'
+  }];
 }
 
+// ------------------------------------------------------------------ entry point
 function getStreams(id, mediaType, season, episode) {
-  mediaType = (mediaType === 'tv' || mediaType === 'series') ? 'tv' : 'movie';
-  console.log(TAG, 'Fetching', mediaType, id, season || '', episode || '');
+  var isTv = (mediaType === 'tv' || mediaType === 'series');
+  var type = isTv ? 'tv' : 'movie';
 
-  // A) ID belongs to the other site -> not mine, return nothing
-  if (hasOtherPrefix(id)) {
-    console.log(TAG, 'ID is for another provider, skipping:', id);
+  var local = parseCeeId(id);
+  if (!local) {
+    // not a cee id: not mine, return nothing (no debug row, so other catalogs stay clean)
     return Promise.resolve([]);
   }
+  console.log(TAG, 'Fetching', type, id, season || '', episode || '');
 
-  // B) My own local ID: cee:12345 (or cee:12345:S:E)
-  var local = parseLocalId(id, ID_PREFIX);
-  if (local) {
-    console.log(TAG, 'Local ID detected:', local.nb);
-    var s = season || local.season;
-    var e = episode || local.episode;
-    var resolvePromise = (mediaType === 'tv')
-      ? resolveVideoId({ nb: local.nb }, mediaType, s, e)
-      : Promise.resolve(local.nb);
+  var s = local.season || season;
+  var e = local.episode || episode;
+  var work;
 
-    return resolvePromise
-      .then(function (videoId) {
-        return videoId ? fetchStreams(videoId) : [];
-      })
-      .catch(logError);
+  if (local.season) {
+    // cee:<series>:<season>:<episode>  ->  find the episode id first
+    work = resolveEpisodeNb(local.nb, local.season, local.episode).then(function (epNb) {
+      return epNb ? fetchStreams(epNb) : [];
+    });
+  } else {
+    // cee:<id>  ->  the id already is the movie / episode id: fetch directly
+    work = fetchStreams(local.nb).then(function (list) {
+      if (list.length || !isTv || !s || !e) return list;
+      // nothing found: maybe the id is a series id and the app also gave season + episode
+      return resolveEpisodeNb(local.nb, s, e).then(function (epNb) {
+        return (epNb && epNb !== local.nb) ? fetchStreams(epNb) : list;
+      });
+    });
   }
 
-  // C) TMDB ID -> search on the site
-  var tmdbIdMatch = String(id).match(/^tmdb:(\d+)/);
-  var tmdbId = tmdbIdMatch ? tmdbIdMatch[1] : String(id);
-
-  return getTmdbInfo(tmdbId, mediaType)
-    .then(function (info) { return findItem(info, mediaType); })
-    .then(function (item) {
-      if (!item) {
-        console.log(TAG, 'No match found on ' + SITE_NAME);
-        return null;
-      }
-      return resolveVideoId(item, mediaType, season, episode);
-    })
-    .then(function (videoId) {
-      return videoId ? fetchStreams(videoId) : [];
-    })
-    .catch(logError);
+  return work.then(function (list) {
+    if (!list.length) {
+      console.log(TAG, 'No streams for', id);
+      return debugRow('no streams for ' + id + ' (' + type + ')');
+    }
+    console.log(TAG, list.length, 'streams for', id);
+    return list;
+  }).catch(function (err) {
+    var msg = err && err.message ? err.message : String(err);
+    console.log(TAG, 'Error:', msg);
+    return debugRow('error ' + msg + ' (' + id + ')');
+  });
 }
 
 if (typeof module !== 'undefined' && module.exports) {
